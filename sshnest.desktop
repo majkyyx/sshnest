@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=SshNest
+Comment=Open saved SSH and SFTP connections
+Exec=sshnest
+Icon=sshnest
+Terminal=false
+Categories=Network;RemoteAccess;
+StartupNotify=true

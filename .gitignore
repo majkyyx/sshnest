@@ -1,0 +1,39 @@
+# Virtual environments and local tools
+.venv/
+.tools/
+
+# Build outputs
+build/
+dist/
+*.spec
+*.AppImage
+*.AppImage.zsync
+
+# Python caches and package metadata
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+*.egg
+
+# Test, lint, and type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local runtime/config leftovers
+*.log
+.env
+.env.*
+
+# Editor and OS noise
+.idea/
+.vscode/
+*~
+.DS_Store
+Thumbs.db
