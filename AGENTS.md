@@ -104,7 +104,7 @@ On first run, if no config exists, SshNest imports SSH commands from shell histo
 
 Example:
 
-- `dotace-test.jmk.cz` -> folder `jmk`, connection `dotace-test`
-- `edotace.jmk.cz` -> folder `jmk`, connection `edotace`
+- `api-stage.example.net` -> folder `example`, connection `api-stage`
+- `worker-01.example.net` -> folder `example`, connection `worker-01`
 
 Keep this behavior stable unless the README and examples are updated too.
