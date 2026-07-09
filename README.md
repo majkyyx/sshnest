@@ -2,6 +2,10 @@
 
 SshNest is a small native Linux GUI for opening saved SSH and SFTP connections.
 
+## Screenshot
+
+![SshNest main window](screens/main_gui.png)
+
 ## Features
 
 - Folder tree for organizing hosts
