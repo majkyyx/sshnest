@@ -1,0 +1,94 @@
+{
+  "connections": [
+    {
+      "folder_id": "folder-production",
+      "host": "api-01.example.net",
+      "id": "connection-production-api",
+      "name": "api-01",
+      "password": null,
+      "remote_path": "/srv/api",
+      "user": "deploy"
+    },
+    {
+      "folder_id": "folder-production",
+      "host": "worker-01.example.net",
+      "id": "connection-production-worker",
+      "name": "worker-01",
+      "password": null,
+      "remote_path": "/srv/worker",
+      "user": "deploy"
+    },
+    {
+      "folder_id": "folder-databases",
+      "host": "db-primary.example.net",
+      "id": "connection-db-primary",
+      "name": "primary",
+      "password": null,
+      "remote_path": "/var/lib/postgresql",
+      "user": "postgres"
+    },
+    {
+      "folder_id": "folder-databases",
+      "host": "db-replica.example.net",
+      "id": "connection-db-replica",
+      "name": "replica",
+      "password": null,
+      "remote_path": "/var/lib/postgresql",
+      "user": "postgres"
+    },
+    {
+      "folder_id": "folder-staging",
+      "host": "stage-web.example.net",
+      "id": "connection-staging-web",
+      "name": "web",
+      "password": null,
+      "remote_path": "/srv/stage",
+      "user": "ubuntu"
+    },
+    {
+      "folder_id": "folder-lab",
+      "host": "forge.lab.local",
+      "id": "connection-lab-forge",
+      "name": "forge",
+      "password": null,
+      "remote_path": "/opt/forge",
+      "user": "admin"
+    },
+    {
+      "folder_id": null,
+      "host": "bastion.example.net",
+      "id": "connection-bastion",
+      "name": "bastion",
+      "password": null,
+      "remote_path": "/home/jump",
+      "user": "jump"
+    }
+  ],
+  "folders": [
+    {
+      "id": "folder-example",
+      "name": "example",
+      "parent_id": null
+    },
+    {
+      "id": "folder-production",
+      "name": "production",
+      "parent_id": "folder-example"
+    },
+    {
+      "id": "folder-databases",
+      "name": "databases",
+      "parent_id": "folder-production"
+    },
+    {
+      "id": "folder-staging",
+      "name": "staging",
+      "parent_id": "folder-example"
+    },
+    {
+      "id": "folder-lab",
+      "name": "lab",
+      "parent_id": null
+    }
+  ]
+}

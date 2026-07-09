@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -41,7 +42,13 @@ class FolderDialog(QDialog):
 
 
 class ConnectionDialog(QDialog):
-    def __init__(self, parent=None, connection: Connection | None = None) -> None:
+    def __init__(
+        self,
+        parent=None,
+        connection: Connection | None = None,
+        folder_choices: list[tuple[str | None, str]] | None = None,
+        selected_folder_id: str | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Connection")
 
@@ -51,6 +58,13 @@ class ConnectionDialog(QDialog):
         self.password_input = QLineEdit(connection.password or "" if connection else "")
         self.password_input.setEchoMode(QLineEdit.Password)
         self.path_input = QLineEdit(connection.remote_path or "" if connection else "")
+        self.folder_input = QComboBox()
+
+        current_folder_id = connection.folder_id if connection else selected_folder_id
+        for folder_id, label in folder_choices or [(None, "No folder")]:
+            self.folder_input.addItem(label, folder_id)
+            if folder_id == current_folder_id:
+                self.folder_input.setCurrentIndex(self.folder_input.count() - 1)
 
         self.name_input.setPlaceholderText("Production")
         self.host_input.setPlaceholderText("example.com")
@@ -63,6 +77,7 @@ class ConnectionDialog(QDialog):
         form.addRow("User", self.user_input)
         form.addRow("Password", self.password_input)
         form.addRow("Remote path", self.path_input)
+        form.addRow("Folder", self.folder_input)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -87,3 +102,7 @@ class ConnectionDialog(QDialog):
             "password": self.password_input.text() or None,
             "remote_path": self.path_input.text().strip() or None,
         }
+
+    def folder_id(self) -> str | None:
+        value = self.folder_input.currentData()
+        return value if isinstance(value, str) else None

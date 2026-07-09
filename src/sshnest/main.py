@@ -1,19 +1,23 @@
 from __future__ import annotations
 
+import os
 import sys
 
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QAction
+from PySide6.QtCore import QSignalBlocker, QModelIndex, QPoint, Qt
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
     QPushButton,
+    QLineEdit,
     QSplitter,
     QStatusBar,
+    QStyledItemDelegate,
     QToolBar,
     QTreeWidget,
     QTreeWidgetItem,
@@ -32,6 +36,23 @@ ITEM_FOLDER = "folder"
 ITEM_CONNECTION = "connection"
 
 
+class TreeRenameDelegate(QStyledItemDelegate):
+    def __init__(self, window: "MainWindow") -> None:
+        super().__init__(window.tree)
+        self.window = window
+
+    def setEditorData(self, editor: QWidget, index: QModelIndex) -> None:
+        item = self.window.tree.itemFromIndex(index)
+        data = item.data(0, Qt.UserRole) if item is not None else None
+        if data and data[0] == ITEM_CONNECTION and isinstance(editor, QLineEdit):
+            connection = self.window._connection_by_id(data[1])
+            if connection is not None:
+                editor.setText(connection.name)
+                editor.selectAll()
+                return
+        super().setEditorData(editor, index)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -46,8 +67,12 @@ class MainWindow(QMainWindow):
         self.tree.setHeaderHidden(True)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.currentItemChanged.connect(self._selection_changed)
+        self.tree.itemChanged.connect(self._tree_item_changed)
         self.tree.itemDoubleClicked.connect(self._double_clicked)
         self.tree.customContextMenuRequested.connect(self._show_tree_menu)
+        self.tree.setItemDelegate(TreeRenameDelegate(self))
+        self.folder_icon = self._make_folder_icon()
+        self.connection_icon = self._make_connection_icon()
 
         self.title_label = QLabel("No connection selected")
         self.title_label.setObjectName("titleLabel")
@@ -78,8 +103,29 @@ class MainWindow(QMainWindow):
         detail_layout.addLayout(buttons)
         detail_layout.addStretch()
 
+        tree_panel = QWidget()
+        tree_layout = QVBoxLayout(tree_panel)
+        tree_layout.setContentsMargins(0, 0, 0, 0)
+        tree_layout.setSpacing(0)
+
+        tree_controls = QWidget()
+        tree_controls_layout = QHBoxLayout(tree_controls)
+        tree_controls_layout.setContentsMargins(8, 8, 8, 4)
+        tree_controls_layout.setSpacing(6)
+
+        collapse_button = QPushButton("Collapse All")
+        collapse_button.clicked.connect(self.tree.collapseAll)
+        expand_button = QPushButton("Expand All")
+        expand_button.clicked.connect(self.tree.expandAll)
+
+        tree_controls_layout.addWidget(collapse_button)
+        tree_controls_layout.addWidget(expand_button)
+        tree_controls_layout.addStretch()
+        tree_layout.addWidget(tree_controls)
+        tree_layout.addWidget(self.tree)
+
         splitter = QSplitter()
-        splitter.addWidget(self.tree)
+        splitter.addWidget(tree_panel)
         splitter.addWidget(detail)
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
@@ -100,7 +146,12 @@ class MainWindow(QMainWindow):
         add_connection = QAction("Add Connection", self)
         add_connection.triggered.connect(self._add_connection)
         edit = QAction("Edit", self)
+        edit.setShortcut("F4")
         edit.triggered.connect(self._edit_selected)
+        rename = QAction("Rename", self)
+        rename.setShortcut("F2")
+        rename.triggered.connect(self._rename_selected)
+        self.addAction(rename)
         delete = QAction("Delete", self)
         delete.triggered.connect(self._delete_selected)
         import_history = QAction("Import History", self)
@@ -141,31 +192,42 @@ class MainWindow(QMainWindow):
         self.store.save()
 
     def refresh_tree(self) -> None:
-        self.tree.clear()
+        selected_data = self._selected_data()
 
-        folder_items: dict[str, QTreeWidgetItem] = {}
-        for folder in sorted(self.store.folders, key=lambda item: item.name.lower()):
-            item = QTreeWidgetItem([folder.name])
-            item.setData(0, Qt.UserRole, (ITEM_FOLDER, folder.id))
-            folder_items[folder.id] = item
+        with QSignalBlocker(self.tree):
+            self.tree.clear()
 
-        for folder in sorted(self.store.folders, key=lambda item: item.name.lower()):
-            item = folder_items[folder.id]
-            if folder.parent_id and folder.parent_id in folder_items:
-                folder_items[folder.parent_id].addChild(item)
-            else:
-                self.tree.addTopLevelItem(item)
+            folder_items: dict[str, QTreeWidgetItem] = {}
+            for folder in sorted(self.store.folders, key=lambda item: item.name.lower()):
+                item = QTreeWidgetItem([folder.name])
+                item.setData(0, Qt.UserRole, (ITEM_FOLDER, folder.id))
+                item.setIcon(0, self.folder_icon)
+                item.setFlags(item.flags() | Qt.ItemIsEditable)
+                folder_items[folder.id] = item
 
-        for connection in sorted(self.store.connections, key=lambda item: item.name.lower()):
-            item = QTreeWidgetItem([connection.name])
-            item.setData(0, Qt.UserRole, (ITEM_CONNECTION, connection.id))
-            parent = folder_items.get(connection.folder_id or "")
-            if parent:
-                parent.addChild(item)
-            else:
-                self.tree.addTopLevelItem(item)
+            for folder in sorted(self.store.folders, key=lambda item: item.name.lower()):
+                item = folder_items[folder.id]
+                if folder.parent_id and folder.parent_id in folder_items:
+                    folder_items[folder.parent_id].addChild(item)
+                else:
+                    self.tree.addTopLevelItem(item)
 
-        self.tree.expandAll()
+            for connection in sorted(
+                self.store.connections, key=lambda item: item.name.lower()
+            ):
+                item = QTreeWidgetItem([self._connection_tree_label(connection)])
+                item.setData(0, Qt.UserRole, (ITEM_CONNECTION, connection.id))
+                item.setIcon(0, self.connection_icon)
+                item.setFlags(item.flags() | Qt.ItemIsEditable)
+                parent = folder_items.get(connection.folder_id or "")
+                if parent:
+                    parent.addChild(item)
+                else:
+                    self.tree.addTopLevelItem(item)
+
+        self.tree.collapseAll()
+        if selected_data is not None:
+            self._select_item_by_data(selected_data)
         self._selection_changed(self.tree.currentItem(), None)
 
     def _selected_data(self) -> tuple[str, str] | None:
@@ -198,11 +260,11 @@ class MainWindow(QMainWindow):
     def _selection_changed(self, current, previous) -> None:
         connection = self._selected_connection()
         enabled = connection is not None
-        self.open_ssh_button.setEnabled(enabled)
-        self.open_sftp_button.setEnabled(enabled)
+        self.open_ssh_button.setVisible(enabled)
+        self.open_sftp_button.setVisible(enabled)
 
         if connection is None:
-            self.title_label.setText("No connection selected")
+            self.title_label.setText("")
             self.host_label.setText("")
             self.user_label.setText("")
             self.path_label.setText("")
@@ -221,6 +283,89 @@ class MainWindow(QMainWindow):
         data = item.data(0, Qt.UserRole)
         if data and data[0] == ITEM_CONNECTION:
             self._open_ssh()
+
+    def _tree_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        if column != 0:
+            return
+
+        data = item.data(0, Qt.UserRole)
+        if not data:
+            return
+
+        if data[0] == ITEM_CONNECTION:
+            self._rename_connection_item(item, data[1])
+            return
+
+        if data[0] != ITEM_FOLDER:
+            return
+
+        folder = self._folder_by_id(data[1])
+        if folder is None:
+            return
+
+        name = item.text(0).strip()
+        if not name:
+            with QSignalBlocker(self.tree):
+                item.setText(0, folder.name)
+            return
+
+        if name == folder.name:
+            return
+
+        if self._folder_name_exists(name, folder.parent_id, exclude_id=folder.id):
+            QMessageBox.warning(
+                self,
+                "Folder exists",
+                "A folder with this name already exists in this branch.",
+            )
+            with QSignalBlocker(self.tree):
+                item.setText(0, folder.name)
+            return
+
+        folder.name = name
+        self.store.save()
+        self.statusBar().showMessage("Folder updated.", 4000)
+
+    def _rename_connection_item(self, item: QTreeWidgetItem, connection_id: str) -> None:
+        connection = self._connection_by_id(connection_id)
+        if connection is None:
+            return
+
+        name = item.text(0).strip()
+        prefix = f"{connection.user}@"
+        if name.startswith(prefix):
+            name = name[len(prefix) :].strip()
+        elif "@" in name:
+            name = name.rsplit("@", 1)[1].strip()
+        if not name:
+            with QSignalBlocker(self.tree):
+                item.setText(0, self._connection_tree_label(connection))
+            return
+
+        if name == self._connection_tree_label(connection):
+            return
+
+        if name == connection.name:
+            with QSignalBlocker(self.tree):
+                item.setText(0, self._connection_tree_label(connection))
+            return
+
+        if self._connection_name_exists(
+            name, connection.folder_id, exclude_id=connection.id
+        ):
+            QMessageBox.warning(
+                self,
+                "Connection exists",
+                "A connection with this name already exists in this branch.",
+            )
+            with QSignalBlocker(self.tree):
+                item.setText(0, self._connection_tree_label(connection))
+            return
+
+        connection.name = name
+        self.store.save()
+        self.refresh_tree()
+        self.statusBar().showMessage("Connection updated.", 4000)
 
     def _show_tree_menu(self, position: QPoint) -> None:
         item = self.tree.itemAt(position)
@@ -244,33 +389,51 @@ class MainWindow(QMainWindow):
 
         if data is not None:
             menu.addSeparator()
+            rename_action = menu.addAction("Rename")
+            rename_action.triggered.connect(self._rename_selected)
             edit_action = menu.addAction("Edit")
             edit_action.triggered.connect(self._edit_selected)
             delete_action = menu.addAction("Delete")
             delete_action.triggered.connect(self._delete_selected)
 
-        menu.addSeparator()
-        import_action = menu.addAction("Import History")
-        import_action.triggered.connect(self._import_history)
-
         menu.exec(self.tree.viewport().mapToGlobal(position))
 
     def _add_folder(self) -> None:
         dialog = FolderDialog(self)
-        if dialog.exec() != dialog.Accepted:
+        if dialog.exec() != QDialog.Accepted:
+            return
+        parent_id = self._selected_folder_parent_id()
+        if self._folder_name_exists(dialog.folder_name(), parent_id):
+            QMessageBox.warning(
+                self,
+                "Folder exists",
+                "A folder with this name already exists in this branch.",
+            )
             return
         self.store.folders.append(
-            Folder(name=dialog.folder_name(), parent_id=self._selected_folder_parent_id())
+            Folder(name=dialog.folder_name(), parent_id=parent_id)
         )
         self._save_refresh("Folder added.")
 
     def _add_connection(self) -> None:
-        dialog = ConnectionDialog(self)
-        if dialog.exec() != dialog.Accepted:
+        dialog = ConnectionDialog(
+            self,
+            folder_choices=self._folder_choices(),
+            selected_folder_id=self._selected_folder_id(),
+        )
+        if dialog.exec() != QDialog.Accepted:
             return
         values = dialog.connection_values()
+        folder_id = dialog.folder_id()
+        if self._connection_name_exists(values["name"] or "", folder_id):
+            QMessageBox.warning(
+                self,
+                "Connection exists",
+                "A connection with this name already exists in this branch.",
+            )
+            return
         self.store.connections.append(
-            Connection(folder_id=self._selected_folder_id(), **values)
+            Connection(folder_id=folder_id, **values)
         )
         self._save_refresh("Connection added.")
 
@@ -285,7 +448,16 @@ class MainWindow(QMainWindow):
             if folder is None:
                 return
             dialog = FolderDialog(self, folder)
-            if dialog.exec() != dialog.Accepted:
+            if dialog.exec() != QDialog.Accepted:
+                return
+            if self._folder_name_exists(
+                dialog.folder_name(), folder.parent_id, exclude_id=folder.id
+            ):
+                QMessageBox.warning(
+                    self,
+                    "Folder exists",
+                    "A folder with this name already exists in this branch.",
+                )
                 return
             folder.name = dialog.folder_name()
             self._save_refresh("Folder updated.")
@@ -294,12 +466,39 @@ class MainWindow(QMainWindow):
         connection = self._connection_by_id(item_id)
         if connection is None:
             return
-        dialog = ConnectionDialog(self, connection)
-        if dialog.exec() != dialog.Accepted:
+        dialog = ConnectionDialog(
+            self,
+            connection,
+            folder_choices=self._folder_choices(),
+        )
+        if dialog.exec() != QDialog.Accepted:
             return
-        for key, value in dialog.connection_values().items():
+        values = dialog.connection_values()
+        folder_id = dialog.folder_id()
+        if self._connection_name_exists(
+            values["name"] or "", folder_id, exclude_id=connection.id
+        ):
+            QMessageBox.warning(
+                self,
+                "Connection exists",
+                "A connection with this name already exists in this branch.",
+            )
+            return
+        for key, value in values.items():
             setattr(connection, key, value)
+        connection.folder_id = folder_id
         self._save_refresh("Connection updated.")
+
+    def _rename_selected(self) -> None:
+        item = self.tree.currentItem()
+        if item is None:
+            return
+
+        data = item.data(0, Qt.UserRole)
+        if not data:
+            return
+
+        self.tree.editItem(item, 0)
 
     def _delete_selected(self) -> None:
         data = self._selected_data()
@@ -333,6 +532,21 @@ class MainWindow(QMainWindow):
         self._save_refresh("Connection deleted.")
 
     def _import_history(self) -> None:
+        answer = QMessageBox.warning(
+            self,
+            "Import SSH history?",
+            "Import from shell history scans your local shell history files and adds "
+            "SSH hosts it finds to SshNest.\n\n"
+            "This can add many entries and may include private hostnames from old "
+            "commands. Your existing saved connections are kept, but the import can "
+            "make the tree noisy.\n\n"
+            "Continue with history import?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
         folders, connections = import_from_history()
         existing_folders = {folder.name: folder for folder in self.store.folders}
         folder_id_map: dict[str, str] = {}
@@ -407,8 +621,103 @@ class MainWindow(QMainWindow):
             (item for item in self.store.connections if item.id == connection_id), None
         )
 
+    def _select_item_by_data(self, selected_data: tuple[str, str]) -> None:
+        matches = self.tree.findItems("*", Qt.MatchWildcard | Qt.MatchRecursive)
+        for item in matches:
+            if item.data(0, Qt.UserRole) == selected_data:
+                self.tree.setCurrentItem(item)
+                return
+
+    def _connection_tree_label(self, connection: Connection) -> str:
+        return f"{connection.user}@{connection.name}"
+
+    def _folder_name_exists(
+        self, name: str, parent_id: str | None, exclude_id: str | None = None
+    ) -> bool:
+        normalized = name.casefold()
+        return any(
+            folder.id != exclude_id
+            and folder.parent_id == parent_id
+            and folder.name.casefold() == normalized
+            for folder in self.store.folders
+        )
+
+    def _connection_name_exists(
+        self, name: str, folder_id: str | None, exclude_id: str | None = None
+    ) -> bool:
+        normalized = name.casefold()
+        return any(
+            connection.id != exclude_id
+            and connection.folder_id == folder_id
+            and connection.name.casefold() == normalized
+            for connection in self.store.connections
+        )
+
+    def _folder_choices(self) -> list[tuple[str | None, str]]:
+        choices: list[tuple[str | None, str]] = [(None, "No folder")]
+        children_by_parent: dict[str | None, list[Folder]] = {}
+        for folder in self.store.folders:
+            children_by_parent.setdefault(folder.parent_id, []).append(folder)
+
+        def add_children(parent_id: str | None, prefix: str = "") -> None:
+            folders = sorted(
+                children_by_parent.get(parent_id, []), key=lambda item: item.name.lower()
+            )
+            for folder in folders:
+                label = f"{prefix}{folder.name}"
+                choices.append((folder.id, label))
+                add_children(folder.id, f"{label} / ")
+
+        add_children(None)
+        return choices
+
+    def _make_folder_icon(self) -> QIcon:
+        pixmap = QPixmap(22, 22)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QColor("#a66b16"))
+        painter.setBrush(QColor("#e8a93a"))
+        painter.drawRoundedRect(2, 7, 18, 11, 3, 3)
+        painter.setPen(QColor("#bf8424"))
+        painter.setBrush(QColor("#f4c35d"))
+        painter.drawRoundedRect(3, 4, 8, 5, 2, 2)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#ffd76d"))
+        painter.drawRoundedRect(3, 8, 16, 8, 2, 2)
+        painter.end()
+
+        return QIcon(pixmap)
+
+    def _make_connection_icon(self) -> QIcon:
+        pixmap = QPixmap(22, 22)
+        pixmap.fill(Qt.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QColor("#146c84"))
+        painter.setBrush(QColor("#2fb7d3"))
+        painter.drawRoundedRect(3, 4, 16, 12, 3, 3)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#96ecff"))
+        painter.drawRoundedRect(5, 6, 12, 5, 2, 2)
+
+        base = QPainterPath()
+        base.moveTo(9, 16)
+        base.lineTo(13, 16)
+        base.lineTo(15, 19)
+        base.lineTo(7, 19)
+        base.closeSubpath()
+        painter.setBrush(QColor("#2288a3"))
+        painter.drawPath(base)
+        painter.end()
+
+        return QIcon(pixmap)
+
 
 def main() -> int:
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
     app = QApplication(sys.argv)
     app.setApplicationName(__app_name__)
     window = MainWindow()

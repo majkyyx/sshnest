@@ -24,6 +24,13 @@ Use a virtual environment. Do not install Python dependencies into the OS Python
 ./scripts/run.sh
 ```
 
+For screenshots or demos, copy the sample config into place:
+
+```bash
+mkdir -p ~/.config/sshnest
+cp samples/screenshot_config.json ~/.config/sshnest/config.json
+```
+
 ## Build
 
 ```bash
