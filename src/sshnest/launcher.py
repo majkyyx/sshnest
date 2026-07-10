@@ -4,6 +4,7 @@ import shlex
 import shutil
 import subprocess
 import time
+from urllib.parse import quote
 
 from .models import Connection
 
@@ -32,19 +33,23 @@ def open_ssh(connection: Connection) -> None:
 
 def open_sftp(connection: Connection) -> None:
     url = _sftp_url(connection)
+    errors: list[str] = []
 
-    opener = shutil.which("gio")
-    if opener:
-        _run_and_wait([opener, "mount", url])
-        _start_and_check([opener, "open", url])
+    nautilus = shutil.which("nautilus")
+    if nautilus and _start_url_opener([nautilus, url], errors):
+        return
+
+    gio = shutil.which("gio")
+    if gio and _start_url_opener([gio, "open", url], errors):
         return
 
     xdg_open = shutil.which("xdg-open")
-    if xdg_open:
-        _start_and_check([xdg_open, url])
+    if xdg_open and _start_url_opener([xdg_open, url], errors):
         return
 
-    raise RuntimeError("No opener found. Install gio or xdg-open.")
+    if errors:
+        raise RuntimeError("Could not open SFTP.\n\n" + "\n\n".join(errors))
+    raise RuntimeError("No opener found. Install Nautilus, gio, or xdg-open.")
 
 
 def _destination(connection: Connection) -> str:
@@ -58,34 +63,20 @@ def _sftp_url(connection: Connection) -> str:
     if path.startswith("/"):
         path = path[1:]
 
-    auth_host = connection.host
+    host = quote(connection.host, safe="[]:")
+    auth_host = host
     if connection.user:
-        auth_host = f"{connection.user}@{connection.host}"
+        user = quote(connection.user, safe="")
+        if connection.password:
+            password = quote(connection.password, safe="")
+            auth_host = f"{user}:{password}@{host}"
+        else:
+            auth_host = f"{user}@{host}"
 
     if path:
+        path = "/".join(quote(part, safe="") for part in path.split("/"))
         return f"sftp://{auth_host}/{path}"
     return f"sftp://{auth_host}/"
-
-
-def _run_and_wait(command: list[str]) -> None:
-    result = subprocess.run(
-        command,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if result.returncode == 0:
-        return
-
-    stderr = result.stderr.strip()
-    already_mounted = "already mounted" in stderr.lower()
-    if already_mounted:
-        return
-
-    command_text = shlex.join(command)
-    if stderr:
-        raise RuntimeError(f"{command_text}\n\n{stderr}")
-    raise RuntimeError(f"{command_text}\n\nCommand exited with {result.returncode}.")
 
 
 def _start_and_check(command: list[str]) -> None:
@@ -106,3 +97,34 @@ def _start_and_check(command: list[str]) -> None:
     if stderr:
         raise RuntimeError(f"{command_text}\n\n{stderr}")
     raise RuntimeError(f"{command_text}\n\nCommand exited with {process.returncode}.")
+
+
+def _start(command: list[str]) -> None:
+    subprocess.Popen(
+        command,
+        stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+    )
+
+
+def _start_url_opener(command: list[str], errors: list[str]) -> bool:
+    process = subprocess.Popen(
+        command,
+        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        text=True,
+        start_new_session=True,
+    )
+    time.sleep(0.25)
+    if process.poll() is None:
+        return True
+    if process.returncode == 0:
+        return True
+
+    command_text = shlex.join(command)
+    stderr = process.stderr.read().strip() if process.stderr else ""
+    if stderr:
+        errors.append(f"{command_text}\n{stderr}")
+    else:
+        errors.append(f"{command_text}\nCommand exited with {process.returncode}.")
+    return False

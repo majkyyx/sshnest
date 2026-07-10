@@ -276,7 +276,9 @@ class MainWindow(QMainWindow):
         self.user_label.setText(f"User: {connection.user}")
         self.path_label.setText(f"Remote path: {connection.remote_path or '-'}")
         self.password_label.setText(
-            "Password: saved" if connection.password else "Password: not saved"
+            "Password: saved, used for SFTP"
+            if connection.password
+            else "Password: not saved"
         )
 
     def _double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
