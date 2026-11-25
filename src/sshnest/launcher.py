@@ -1,12 +1,51 @@
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from urllib.parse import quote
 
 from .models import Connection
+
+
+def _host_environment() -> dict[str, str]:
+    """External desktop programs must use host libraries, not our frozen GTK bundle."""
+    env = os.environ.copy()
+    if not getattr(sys, "frozen", False):
+        return env
+    if env.get("LD_LIBRARY_PATH_ORIG"):
+        env["LD_LIBRARY_PATH"] = env["LD_LIBRARY_PATH_ORIG"]
+    else:
+        env.pop("LD_LIBRARY_PATH", None)
+    bundle = getattr(sys, "_MEIPASS", "")
+    if bundle:
+        for key in (
+            "GI_TYPELIB_PATH",
+            "GIO_MODULE_DIR",
+            "GTK_DATA_PREFIX",
+            "GTK_EXE_PREFIX",
+            "GTK_PATH",
+            "PANGO_LIBDIR",
+            "PANGO_SYSCONFDIR",
+            "GDK_PIXBUF_MODULE_FILE",
+            "GSETTINGS_SCHEMA_DIR",
+            "XDG_DATA_DIRS",
+        ):
+            if key not in env:
+                continue
+            paths = [
+                p
+                for p in env[key].split(os.pathsep)
+                if p != bundle and not p.startswith(bundle + os.sep)
+            ]
+            if paths:
+                env[key] = os.pathsep.join(paths)
+            else:
+                env.pop(key, None)
+    return env
 
 
 def open_ssh(connection: Connection) -> None:
@@ -82,6 +121,7 @@ def _sftp_url(connection: Connection) -> str:
 def _start_and_check(command: list[str]) -> None:
     process = subprocess.Popen(
         command,
+        env=_host_environment(),
         stderr=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         text=True,
@@ -102,6 +142,7 @@ def _start_and_check(command: list[str]) -> None:
 def _start(command: list[str]) -> None:
     subprocess.Popen(
         command,
+        env=_host_environment(),
         stderr=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
     )
@@ -110,6 +151,7 @@ def _start(command: list[str]) -> None:
 def _start_url_opener(command: list[str], errors: list[str]) -> bool:
     process = subprocess.Popen(
         command,
+        env=_host_environment(),
         stderr=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         text=True,

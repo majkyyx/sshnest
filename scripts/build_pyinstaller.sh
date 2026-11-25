@@ -8,10 +8,8 @@ if [[ ! -x .venv/bin/python ]]; then
   ./scripts/dev_setup.sh
 fi
 
-. .venv/bin/activate
-python -m PyInstaller \
-  --noconfirm \
-  --clean \
-  --windowed \
-  --name SshNest \
-  scripts/pyinstaller_entry.py
+.venv/bin/python -c 'import gi; gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1"); from gi.repository import Gtk, Adw' || {
+  echo "GTK4 bindings are missing. Run ./scripts/dev_setup.sh; see README for native prerequisites." >&2
+  exit 1
+}
+.venv/bin/python -m PyInstaller --noconfirm --clean scripts/sshnest.spec

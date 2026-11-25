@@ -37,3 +37,6 @@ htmlcov/
 *~
 .DS_Store
 Thumbs.db
+
+# Maintained GTK bundle definition
+!scripts/sshnest.spec
