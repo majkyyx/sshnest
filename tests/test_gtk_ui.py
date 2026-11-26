@@ -264,6 +264,75 @@ class GtkWorkflowTests(unittest.TestCase):
         self.select("connection", "connection-bastion")
         self.assertTrue(w.split.get_show_content())
 
+    def test_folder_context_menu_add_actions_open_and_save_in_selected_folder(self):
+        w = self.window
+
+        def descendants(widget):
+            yield widget
+            child = widget.get_first_child()
+            while child:
+                yield from descendants(child)
+                child = child.get_next_sibling()
+
+        for label, title in [
+            ("New Folder", "New Folder"),
+            ("New Connection", "New Connection"),
+        ]:
+            with self.subTest(action=label):
+                self.select("folder", "folder-lab")
+                expander = next(
+                    widget
+                    for widget in descendants(w.tree)
+                    if isinstance(widget, Gtk.TreeExpander)
+                    and widget.get_list_row().get_item().key == ("folder", "folder-lab")
+                )
+                controllers = expander.observe_controllers()
+                for i in range(controllers.get_n_items()):
+                    controller = controllers.get_item(i)
+                    if (
+                        isinstance(controller, Gtk.GestureClick)
+                        and controller.get_button() == 3
+                    ):
+                        controller.emit("pressed", 1, 12.0, 12.0)
+                        break
+                drain()
+                popover = next(
+                    widget
+                    for widget in descendants(expander)
+                    if isinstance(widget, Gtk.PopoverMenu)
+                )
+                menu_label = next(
+                    widget
+                    for widget in descendants(popover)
+                    if isinstance(widget, Gtk.Label) and widget.get_label() == label
+                )
+                # Activate the real menu item, including GTK's close-and-dispatch sequence.
+                button = menu_label
+                while not isinstance(button, Gtk.Actionable):
+                    button = button.get_parent()
+                self.assertTrue(button.activate())
+                drain(0.15)
+                dialog = w.get_visible_dialog()
+                self.assertIsNotNone(dialog)
+                self.assertEqual(dialog.get_title(), title)
+                self.assertIsNone(popover.get_parent())
+                dialog.name_input.set_text("context-added")
+                if label == "New Connection":
+                    dialog.host_input.set_text("context.example.net")
+                    dialog.user_input.set_text("test")
+                dialog.save_button.emit("clicked")
+                drain()
+                saved = ConfigStore(self.path)
+                saved.load()
+                if label == "New Folder":
+                    item = next(f for f in saved.folders if f.name == "context-added")
+                    self.assertEqual(item.parent_id, "folder-lab")
+                else:
+                    item = next(
+                        c for c in saved.connections if c.name == "context-added"
+                    )
+                    self.assertEqual(item.folder_id, "folder-lab")
+
     def test_cycle_does_not_hang_or_duplicate_nodes(self):
         self.store.folders = [
             Folder(name="a", id="a", parent_id="b"),

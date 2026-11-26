@@ -367,7 +367,9 @@ class MainWindow(Adw.ApplicationWindow):
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         popover.set_pointing_to(rect)
-        popover.connect("closed", lambda p: p.unparent())
+        # GTK closes the menu before dispatching its action. Keep the window
+        # action ancestry alive until dispatch finishes.
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
         popover.popup()
 
     def _selected_node(self) -> TreeNode | None:
